@@ -969,59 +969,107 @@ document.getElementById("btnDemo").onclick=()=>{
    ============================================================ */
 function fitAll(){ const v=visibleCases(); if(v.length) map.fitBounds(L.latLngBounds(v.map(c=>[c.lat,c.lng])).pad(0.25)); }
 
-/* ============================================================
-   LIVE PULL — fetches fresh public records each load.
-   Source: Chicago Open Data (Socrata, CORS-enabled). Records
-   carry real per-incident lat/lng, so pins place accurately.
-   Live cases are NOT written to localStorage (privacy +
-   always-fresh); they re-fetch every time the page opens.
-   ============================================================ */
-const LIVE_SOURCE = {
-  label: "Indianapolis IMPD (UCR 2021)",
-  // Official IndyGIS open-data layer. ArcGIS query API, CORS-enabled.
-  // UCR 110 = Criminal Homicide. Each row carries real LATITUDE/LONGITUDE.
-  url: "https://gis.indy.gov/server/rest/services/OpenData/OpenData_NonSpatial/MapServer/27/query?where=UCR%3D110&outFields=CRIME,DATE_,TIME,CASE_,ADDRESS,LATITUDE,LONGITUDE&resultRecordCount=500&f=json"
-};
-function mapLiveRow(o){
+/* LIVE_SOURCES: pulled fresh on every load, never persisted.
+   - Homicides: Indianapolis IMPD UCR (real per-incident lat/lng).
+   - Missing persons: NamUs public table. NamUs only publishes a
+     city-level point for privacy, so every Indianapolis case shares
+     the city centroid. We spread them with a small deterministic
+     jitter and flag them approx:true so the map is readable without
+     implying a precise location we do not have. */
+const LIVE_SOURCES = [
+  {
+    key: "homicide",
+    label: "Indianapolis IMPD (UCR 2021)",
+    url: "https://gis.indy.gov/server/rest/services/OpenData/OpenData_NonSpatial/MapServer/27/query?where=UCR%3D110&outFields=CASE_,DATE_,TIME,CRIME,LATITUDE,LONGITUDE&returnGeometry=false&outSR=4326&f=json",
+    map: mapHomicideRow
+  },
+  {
+    key: "missing",
+    label: "NamUs Missing Persons (Indianapolis)",
+    url: "https://services.arcgis.com/ADr6pbRm6SH54a8p/arcgis/rest/services/Missing_Persons_NamUS_Table/FeatureServer/0/query?where=City%3D%27Indianapolis%27&outFields=Case_Number,Legal_First_Name,Legal_Last_Name,Status,Missing_Age,Biological_Sex,DLC,City,State,Investigating_Agencies&returnGeometry=true&outSR=4326&f=json",
+    map: mapMissingRow
+  }
+];
+function mapHomicideRow(f){
+  const o = f.attributes || f;
   const lat = parseFloat(o.LATITUDE), lng = parseFloat(o.LONGITUDE);
   if(isNaN(lat) || isNaN(lng)) return null;
-  const addr = (o.ADDRESS||"").trim();
-  // DATE_ is epoch milliseconds; render as YYYY-MM-DD
   let dateStr = "";
   if(o.DATE_ != null && !isNaN(parseInt(o.DATE_))){ dateStr = new Date(parseInt(o.DATE_)).toISOString().slice(0,10); }
   return {
-    id: "live-" + (o.CASE_ || o.OBJECTID || uid()),
-    name: o.CASE_ ? (o.CASE_ + (addr?" \u00b7 "+addr:"")) : (addr || "Case"),
+    id: "live-h-" + (o.CASE_ || o.OBJECTID || uid()),
+    name: o.CASE_ ? ("Homicide · " + o.CASE_) : "Homicide",
     type: "homicide",
     date: dateStr,
     year: yearOf(dateStr),
     lat, lng, approx:false, age:"", sex:"",
-    agency:"IMPD", url:"", source: LIVE_SOURCE.label,
+    agency:"IMPD", url:"", source:"Indianapolis IMPD (UCR 2021)",
     tags: [ "homicide", (o.CRIME||"").toLowerCase() ].filter(Boolean).slice(0,4),
-    notes: [o.CRIME, addr, (o.TIME?("Time: "+o.TIME):"")].filter(Boolean).join(" \u2014 "),
+    notes: [o.CRIME, (o.TIME?"Time: "+o.TIME:"")].filter(Boolean).join(" — "),
+    _live: true
+  };
+}
+function mapMissingRow(f){
+  const o = f.attributes || f;
+  const g = f.geometry || {};
+  let lat = parseFloat(g.y), lng = parseFloat(g.x);
+  if(isNaN(lat) || isNaN(lng)) return null;
+  const seed = String(o.Case_Number||o.FID||uid());
+  let h = 0; for(let i=0;i<seed.length;i++){ h = (h*31 + seed.charCodeAt(i)) & 0xffffffff; }
+  const a = (h % 360) * Math.PI / 180;
+  const rad = 0.004 + ((h>>>9) % 1000)/1000 * 0.018;
+  lat += rad * Math.cos(a);
+  lng += rad * Math.sin(a) / Math.cos(lat*Math.PI/180);
+  const first = (o.Legal_First_Name||"").trim();
+  const last = (o.Legal_Last_Name||"").trim();
+  const nm = (first||last) ? (first+" "+last).trim() : (o.Case_Number||"Missing person");
+  let dateStr = "";
+  if(o.DLC){ const d=new Date(o.DLC); if(!isNaN(d)) dateStr=d.toISOString().slice(0,10); }
+  return {
+    id: "live-m-" + (o.Case_Number || o.FID || uid()),
+    name: nm,
+    type: "missing",
+    date: dateStr,
+    year: yearOf(dateStr),
+    lat, lng, approx:true, age:(o.Missing_Age||""), sex:(o.Biological_Sex||""),
+    agency:(o.Investigating_Agencies||""), url:"", source:"NamUs Missing Persons (Indianapolis)",
+    tags: [ "missing", (o.Status||"").toLowerCase() ].filter(Boolean).slice(0,4),
+    notes: [ "City-level location (approximate)", (o.Case_Number?"NamUs "+o.Case_Number:"") ].filter(Boolean).join(" — "),
     _live: true
   };
 }
 async function pullLive(){
-  toast("Loading live records from " + LIVE_SOURCE.label + "\u2026");
-  try{
-    const res = await fetch(LIVE_SOURCE.url, {headers:{"Accept":"application/json"}});
-    if(!res.ok) throw new Error("HTTP " + res.status);
-    const json = await res.json();
-    if(json.error) throw new Error(json.error.message || "API error");
-    const data = (json.features || []).map(f => f.attributes || f);
-    state.cases = state.cases.filter(c => !c._live);
-    const seen = new Set(state.cases.map(c=>c.id));
-    let n = 0;
-    data.forEach(o => { const c = mapLiveRow(o); if(c && !seen.has(c.id)){ seen.add(c.id); state.cases.push(c); n++; } });
-    render();
-    if(n) fitAll();
-    toast("Loaded " + n + " live records from " + LIVE_SOURCE.label + ".");
-    document.getElementById("dataHint").textContent = "Live data from " + LIVE_SOURCE.label + " \u2014 refreshed each load, not stored.";
-  }catch(err){
-    toast("Live pull failed: " + err.message);
-    document.getElementById("dataHint").textContent = "Live pull failed (" + err.message + "). You can still Import a CSV/JSON or Add cases.";
-    console.warn("[LIVE] " + err.message);
+  const hint = document.getElementById("dataHint");
+  toast("Loading live records…");
+  state.cases = state.cases.filter(c => !c._live);
+  const seen = new Set(state.cases.map(c=>c.id));
+  let total = 0; const okLabels = []; const failLabels = [];
+  for(const src of LIVE_SOURCES){
+    try{
+      const res = await fetch(src.url, {headers:{"Accept":"application/json"}});
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      const json = await res.json();
+      if(json.error) throw new Error(json.error.message || "API error");
+      const feats = json.features || [];
+      let n = 0;
+      feats.forEach(f => { const c = src.map(f); if(c && !seen.has(c.id)){ seen.add(c.id); state.cases.push(c); n++; } });
+      total += n; okLabels.push(n + " " + src.key);
+    }catch(err){
+      failLabels.push(src.label + " (" + err.message + ")");
+      console.warn("[LIVE] " + src.label + ": " + err.message);
+    }
+  }
+  render();
+  if(total) fitAll();
+  if(okLabels.length){
+    toast("Loaded " + total + " live records (" + okLabels.join(", ") + ").");
+    hint.textContent = "Live data: " + okLabels.join(", ") + " — refreshed each load, not stored. Missing-person pins are approximate (city-level).";
+  }
+  if(failLabels.length && !okLabels.length){
+    toast("Live pull failed.");
+    hint.textContent = "Live pull failed: " + failLabels.join("; ") + ". You can still Import a CSV/JSON or Add cases.";
+  } else if(failLabels.length){
+    hint.textContent += "  (Some sources failed: " + failLabels.join("; ") + ")";
   }
 }
 document.getElementById("btnFbi").textContent = "Pull live cases";
