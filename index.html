@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>The Missing Map</title>
+
+<!-- Leaflet (map engine) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<!-- Fonts (degrade gracefully offline) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --ink:#0b0d12; --ink-2:#11151d; --ink-3:#171c25; --raise:#1d2430;
+    --line:#2a323d; --line-soft:#222934;
+    --bone:#d8d2c2; --bone-dim:#8f8a7c; --bone-faint:#5f5c52;
+    --oxblood:#a8443f; --oxblood-bright:#d05a52; --thread:#b8453f;
+    --amber:#c9a14a;           /* missing */
+    --slate:#6f8aa3;           /* unidentified */
+    --teal:#74a8a0;            /* site of interest */
+    --cyan:#cfe8e6;            /* selection / active */
+    --shadow: 0 14px 40px rgba(0,0,0,.55);
+    --mono:"JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+    --disp:"Oswald", "Arial Narrow", "Helvetica Neue", sans-serif;
+    --body:"IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--ink); color:var(--bone); font-family:var(--body);
+    font-size:14px; overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* ---------- layout ---------- */
+  .app{display:grid; grid-template-columns:330px 1fr; height:100vh}
+  .rail{
+    background:linear-gradient(180deg,var(--ink-2),var(--ink));
+    border-right:1px solid var(--line);
+    display:flex; flex-direction:column; min-height:0;
+  }
+  .stage{position:relative; min-width:0}
+  #map{position:absolute; inset:0; background:#05070b}
+
+  /* ---------- brand ---------- */
+  .brand{padding:18px 18px 14px; border-bottom:1px solid var(--line)}
+  .brand .stamp{
+    display:inline-block; font-family:var(--disp); font-weight:600; letter-spacing:.18em;
+    font-size:11px; color:var(--ink); background:var(--bone);
+    padding:3px 9px; transform:rotate(-1.5deg); text-transform:uppercase;
+  }
+  .brand h1{
+    font-family:var(--disp); font-weight:500; letter-spacing:.04em;
+    font-size:23px; margin:11px 0 2px; line-height:1.05;
+  }
+  .brand .sub{font-family:var(--mono); font-size:10.5px; color:var(--bone-dim); letter-spacing:.04em}
+
+  /* ---------- scroll body ---------- */
+  .rail-scroll{overflow-y:auto; flex:1; min-height:0; padding-bottom:14px}
+  .rail-scroll::-webkit-scrollbar{width:9px}
+  .rail-scroll::-webkit-scrollbar-thumb{background:var(--line); border-radius:0}
+  .rail-scroll::-webkit-scrollbar-track{background:transparent}
+
+  /* redaction-bar section header (signature device) */
+  .sec{padding:16px 18px 4px}
+  .sec > .label{
+    position:relative; font-family:var(--mono); font-size:10px; letter-spacing:.22em;
+    text-transform:uppercase; color:var(--bone); margin-bottom:11px;
+    display:flex; align-items:center; gap:9px;
+  }
+  .sec > .label::before{content:""; width:13px; height:11px; background:var(--bone); flex:0 0 auto; transform:skewX(-12deg)}
+  .sec > .label::after{content:""; height:1px; flex:1; background:var(--line)}
+
+  .field{margin-bottom:10px}
+  .field label{display:block; font-family:var(--mono); font-size:9.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--bone-faint); margin-bottom:4px}
+  input[type=text], input[type=number], input[type=date], select, textarea{
+    width:100%; background:var(--ink-3); border:1px solid var(--line); color:var(--bone);
+    font-family:var(--mono); font-size:12px; padding:7px 9px; border-radius:0; outline:none;
+  }
+  input:focus, select:focus, textarea:focus{border-color:var(--cyan); box-shadow:0 0 0 1px rgba(207,232,230,.18)}
+  textarea{resize:vertical; min-height:54px; line-height:1.4}
+
+  .row{display:flex; gap:8px}
+  .row > *{flex:1}
+
+  /* buttons */
+  .btn{
+    font-family:var(--mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase;
+    background:var(--raise); color:var(--bone); border:1px solid var(--line);
+    padding:8px 10px; cursor:pointer; width:100%; text-align:center; transition:.13s;
+  }
+  .btn:hover{border-color:var(--bone-dim); background:#222a36}
+  .btn.danger:hover{border-color:var(--oxblood); color:var(--oxblood-bright)}
+  .btn.go{background:var(--oxblood); border-color:var(--oxblood); color:#fff}
+  .btn.go:hover{background:var(--oxblood-bright); border-color:var(--oxblood-bright)}
+  .btn.ghost{background:transparent}
+  .btn-row{display:flex; gap:8px; margin-top:8px}
+  .btn-row .btn{width:auto; flex:1}
+
+  /* toggles / checkable filters */
+  .chk{display:flex; align-items:center; gap:9px; padding:6px 7px; cursor:pointer; user-select:none; border:1px solid transparent}
+  .chk:hover{background:var(--ink-3)}
+  .chk input{appearance:none; width:14px; height:14px; border:1px solid var(--line); background:var(--ink-3); cursor:pointer; position:relative; flex:0 0 auto}
+  .chk input:checked{background:currentColor; border-color:currentColor}
+  .chk input:checked::after{content:"✕"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--ink); font-weight:700}
+  .chk .swatch{width:9px;height:9px;flex:0 0 auto;display:inline-block}
+  .chk .txt{font-family:var(--mono); font-size:11px; letter-spacing:.04em; flex:1}
+  .chk .cnt{font-family:var(--mono); font-size:10px; color:var(--bone-faint)}
+  .t-missing{color:var(--amber)} .t-homicide{color:var(--oxblood-bright)}
+  .t-unidentified{color:var(--slate)} .t-site{color:var(--teal)}
+
+  .hint{font-family:var(--mono); font-size:10px; color:var(--bone-faint); line-height:1.5; margin-top:6px}
+
+  /* stat strip */
+  .stats{display:grid; grid-template-columns:1fr 1fr 1fr; gap:1px; background:var(--line); border-top:1px solid var(--line); border-bottom:1px solid var(--line)}
+  .stat{background:var(--ink-2); padding:11px 12px}
+  .stat .n{font-family:var(--disp); font-size:22px; font-weight:500; line-height:1}
+  .stat .k{font-family:var(--mono); font-size:8.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--bone-faint); margin-top:3px}
+
+  /* ---------- map overlays ---------- */
+  .map-top{
+    position:absolute; top:12px; left:12px; right:12px; z-index:600;
+    display:flex; gap:9px; align-items:center; pointer-events:none; flex-wrap:wrap;
+  }
+  .map-top > *{pointer-events:auto}
+  .searchbox{
+    background:rgba(11,13,18,.86); backdrop-filter:blur(7px); border:1px solid var(--line);
+    display:flex; align-items:center; gap:8px; padding:0 10px; min-width:230px; box-shadow:var(--shadow);
+  }
+  .searchbox input{background:transparent; border:none; padding:9px 0; font-size:12px}
+  .searchbox input:focus{box-shadow:none}
+  .searchbox .ic{color:var(--bone-faint); font-family:var(--mono); font-size:13px}
+
+  .pill{
+    background:rgba(11,13,18,.86); backdrop-filter:blur(7px); border:1px solid var(--line);
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--bone-dim); padding:9px 12px; cursor:pointer; box-shadow:var(--shadow); transition:.13s;
+    display:flex; align-items:center; gap:7px;
+  }
+  .pill:hover{color:var(--bone); border-color:var(--bone-dim)}
+  .pill.on{color:var(--ink); background:var(--thread); border-color:var(--thread)}
+  .pill.on.link{background:var(--cyan); border-color:var(--cyan)}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+
+  .legend{
+    position:absolute; left:12px; bottom:14px; z-index:600;
+    background:rgba(11,13,18,.86); backdrop-filter:blur(7px); border:1px solid var(--line);
+    padding:11px 13px; box-shadow:var(--shadow); font-family:var(--mono); font-size:10px;
+  }
+  .legend .lh{letter-spacing:.16em; text-transform:uppercase; color:var(--bone-faint); margin-bottom:8px; font-size:9px}
+  .legend .li{display:flex; align-items:center; gap:8px; margin:4px 0; color:var(--bone-dim)}
+  .legend .li b{width:9px;height:9px;display:inline-block}
+  .legend .li.thread b{width:16px;height:2px;background:var(--thread)}
+  .legend .li.thread.manual b{background:var(--cyan); height:3px}
+
+  /* ---------- detail panel ---------- */
+  .panel{
+    position:absolute; top:0; right:0; bottom:0; width:360px; z-index:700;
+    background:linear-gradient(180deg,var(--ink-2),var(--ink));
+    border-left:1px solid var(--line); box-shadow:-20px 0 50px rgba(0,0,0,.5);
+    transform:translateX(105%); transition:transform .22s cubic-bezier(.2,.7,.2,1);
+    display:flex; flex-direction:column;
+  }
+  .panel.open{transform:none}
+  .panel .ph{padding:16px 18px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:flex-start; gap:10px}
+  .panel .tag{
+    font-family:var(--mono); font-size:9px; letter-spacing:.16em; text-transform:uppercase;
+    padding:2px 7px; border:1px solid currentColor; display:inline-block; margin-bottom:8px;
+  }
+  .panel h2{font-family:var(--disp); font-weight:500; font-size:21px; margin:0; line-height:1.1}
+  .panel .x{cursor:pointer; color:var(--bone-faint); font-family:var(--mono); font-size:18px; line-height:1; padding:2px 4px}
+  .panel .x:hover{color:var(--bone)}
+  .panel .pb{padding:16px 18px; overflow-y:auto; flex:1}
+  .kv{display:grid; grid-template-columns:78px 1fr; gap:6px 12px; font-family:var(--mono); font-size:11.5px; margin-bottom:14px}
+  .kv .k{color:var(--bone-faint); letter-spacing:.08em; text-transform:uppercase; font-size:9.5px; padding-top:2px}
+  .kv .v{color:var(--bone); word-break:break-word}
+  .kv .v a{color:var(--cyan); text-decoration:none}
+  .kv .v a:hover{text-decoration:underline}
+  .chips{display:flex; flex-wrap:wrap; gap:5px; margin-bottom:14px}
+  .chip{font-family:var(--mono); font-size:9.5px; padding:2px 7px; background:var(--ink-3); border:1px solid var(--line); color:var(--bone-dim)}
+  .notes{font-size:12.5px; line-height:1.55; color:var(--bone); white-space:pre-wrap; border-left:2px solid var(--line); padding-left:11px; margin-top:4px}
+  .panel .pf{padding:12px 18px; border-top:1px solid var(--line); display:flex; gap:8px}
+
+  .approx{font-family:var(--mono); font-size:9px; color:var(--amber); letter-spacing:.1em}
+
+  /* toast */
+  #toast{
+    position:fixed; bottom:18px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--ink-3); border:1px solid var(--line); color:var(--bone);
+    font-family:var(--mono); font-size:11.5px; padding:10px 16px; box-shadow:var(--shadow);
+    opacity:0; transition:.2s; z-index:900; pointer-events:none; max-width:80vw;
+  }
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+
+  /* leaflet marker glyphs */
+  .pin{position:relative; transform:translate(-50%,-100%)}
+  .pin .head{
+    width:15px;height:15px;border-radius:50% 50% 50% 0; transform:rotate(-45deg);
+    border:1.5px solid rgba(0,0,0,.55); box-shadow:0 0 0 2px rgba(11,13,18,.7), 0 0 11px -1px currentColor;
+  }
+  .pin.sel .head{box-shadow:0 0 0 2px var(--cyan), 0 0 16px 1px currentColor; width:18px;height:18px}
+  .pin .deg{
+    position:absolute; top:-9px; left:50%; transform:translateX(-50%);
+    font-family:var(--mono); font-size:8px; color:var(--bone); background:rgba(11,13,18,.85);
+    padding:0 3px; border:1px solid var(--line); display:none;
+  }
+  .pin.has-deg .deg{display:block}
+  .leaflet-container{background:#05070b; font-family:var(--mono)}
+  .leaflet-control-attribution{background:rgba(11,13,18,.7)!important; color:var(--bone-faint)!important; font-size:9px!important}
+  .leaflet-control-attribution a{color:var(--bone-dim)!important}
+  .leaflet-bar a{background:var(--ink-2)!important; color:var(--bone)!important; border-color:var(--line)!important}
+  .leaflet-bar a:hover{background:var(--raise)!important}
+  .thread-path{stroke:var(--thread); stroke-width:1; opacity:.42}
+  .thread-path.manual{stroke:var(--cyan); stroke-width:1.6; opacity:.85}
+  .radius-ring{stroke:var(--cyan); fill:rgba(207,232,230,.05); stroke-dasharray:4 4; stroke-width:1}
+
+  /* file input hidden */
+  .file-in{display:none}
+
+  /* small responsive */
+  @media (max-width:780px){
+    .app{grid-template-columns:1fr; grid-template-rows:auto 1fr}
+    .rail{max-height:46vh}
+    .panel{width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ===================== LEFT RAIL ===================== -->
+  <aside class="rail">
+    <div class="brand">
+      <span class="stamp">Unsolved · No Recovery</span>
+      <h1>The Missing Map</h1>
+      <div class="sub">missing · homicide · unidentified · local</div>
+    </div>
+
+    <div class="rail-scroll">
+
+      <!-- STATS -->
+      <div class="stats">
+        <div class="stat"><div class="n" id="stTotal">0</div><div class="k">Cases</div></div>
+        <div class="stat"><div class="n" id="stShown">0</div><div class="k">On Board</div></div>
+        <div class="stat"><div class="n" id="stLinks">0</div><div class="k">Threads</div></div>
+      </div>
+
+      <!-- FILTERS -->
+      <div class="sec">
+        <div class="label">Show on board</div>
+        <label class="chk t-missing"><input type="checkbox" data-type="missing" checked><span class="swatch" style="background:var(--amber)"></span><span class="txt">Missing — no recovery</span><span class="cnt" id="cMissing">0</span></label>
+        <label class="chk t-homicide"><input type="checkbox" data-type="homicide" checked><span class="swatch" style="background:var(--oxblood-bright)"></span><span class="txt">Homicide — no body</span><span class="cnt" id="cHomicide">0</span></label>
+        <label class="chk t-unidentified"><input type="checkbox" data-type="unidentified" checked><span class="swatch" style="background:var(--slate)"></span><span class="txt">Unidentified remains</span><span class="cnt" id="cUnidentified">0</span></label>
+        <label class="chk t-site"><input type="checkbox" data-type="site" checked><span class="swatch" style="background:var(--teal)"></span><span class="txt">Site of interest</span><span class="cnt" id="cSite">0</span></label>
+        <div class="field" style="margin-top:10px">
+          <label>Year range</label>
+          <div class="row">
+            <input type="number" id="yrMin" placeholder="from" />
+            <input type="number" id="yrMax" placeholder="to" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Tag contains</label>
+          <input type="text" id="tagFilter" placeholder="e.g. downtown, highway, park" />
+        </div>
+      </div>
+
+      <!-- NETWORK -->
+      <div class="sec">
+        <div class="label">Thread rules</div>
+        <div class="hint" style="margin-top:0;margin-bottom:8px">Auto-draw threads between cases that share traits. Manual threads (asserted links) always show.</div>
+        <label class="chk"><input type="checkbox" id="lnkDist" checked><span class="txt">Within distance</span></label>
+        <div class="field"><div class="row">
+          <input type="number" id="lnkMiles" value="25" min="0" step="5" />
+          <select id="lnkUnit"><option value="mi">miles</option><option value="km">km</option></select>
+        </div></div>
+        <label class="chk"><input type="checkbox" id="lnkTime"><span class="txt">Within time window</span></label>
+        <div class="field"><input type="number" id="lnkYears" value="5" min="0" step="1" placeholder="± years" /></div>
+        <label class="chk"><input type="checkbox" id="lnkType"><span class="txt">Same case type only</span></label>
+        <label class="chk"><input type="checkbox" id="lnkTag"><span class="txt">Shares a tag</span></label>
+        <div class="hint">Checked rules combine with AND. Distance is required for a thread to render.</div>
+      </div>
+
+      <!-- ADD -->
+      <div class="sec">
+        <div class="label">Add a case</div>
+        <div class="hint" style="margin-top:0;margin-bottom:8px">Click <b>Drop on map</b>, then click the map to set the location, or type coordinates.</div>
+        <div class="field"><label>Name / label</label><input type="text" id="fName" placeholder="Victim or case name" /></div>
+        <div class="row">
+          <div class="field"><label>Type</label>
+            <select id="fType">
+              <option value="missing">Missing</option>
+              <option value="homicide">Homicide</option>
+              <option value="unidentified">Unidentified</option>
+              <option value="site">Site of interest</option>
+            </select>
+          </div>
+          <div class="field"><label>Date / year</label><input type="text" id="fDate" placeholder="2018 or 2018-04-12" /></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Lat</label><input type="number" id="fLat" step="0.00001" placeholder="40.75890" /></div>
+          <div class="field"><label>Lng</label><input type="number" id="fLng" step="0.00001" placeholder="-73.98510" /></div>
+        </div>
+        <div class="field"><label>Agency / source</label><input type="text" id="fAgency" placeholder="e.g. Local PD · NamUs #" /></div>
+        <div class="field"><label>Source URL</label><input type="text" id="fUrl" placeholder="https://" /></div>
+        <div class="field"><label>Tags (comma separated)</label><input type="text" id="fTags" placeholder="downtown, highway, last seen" /></div>
+        <div class="field"><label>Notes</label><textarea id="fNotes" placeholder="Facts, timeline, observations…"></textarea></div>
+        <label class="chk"><input type="checkbox" id="fApprox"><span class="txt">Location is approximate</span></label>
+        <div class="btn-row">
+          <button class="btn ghost" id="btnDrop">Drop on map</button>
+          <button class="btn go" id="btnAdd">Add case</button>
+        </div>
+      </div>
+
+      <!-- DATA -->
+      <div class="sec">
+        <div class="label">Data</div>
+        <div class="btn-row">
+          <button class="btn" id="btnImport">Import CSV / JSON</button>
+          <button class="btn" id="btnExport">Export</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn" id="btnFbi">Pull FBI cases</button>
+          <button class="btn" id="btnDemo">Demo nodes</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn ghost" id="btnTemplate">CSV template</button>
+          <button class="btn danger" id="btnClear">Clear board</button>
+        </div>
+        <input type="file" id="fileImport" class="file-in" accept=".csv,.json,application/json,text/csv" />
+        <div class="hint" id="dataHint">Everything stays in this browser (localStorage). Nothing is uploaded.</div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- ===================== MAP STAGE ===================== -->
+  <main class="stage">
+    <div id="map"></div>
+
+    <div class="map-top">
+      <div class="searchbox">
+        <span class="ic">⌕</span>
+        <input type="text" id="search" placeholder="search names, agencies, tags…" />
+      </div>
+      <div class="pill" id="pillNet"><span class="dot"></span>Threads</div>
+      <div class="pill link" id="pillLink">Link mode</div>
+      <div class="pill" id="pillRadius">Radius</div>
+      <div class="pill" id="pillFit">Fit board</div>
+    </div>
+
+    <div class="legend">
+      <div class="lh">Legend</div>
+      <div class="li"><b style="background:var(--amber)"></b>Missing</div>
+      <div class="li"><b style="background:var(--oxblood-bright)"></b>Homicide</div>
+      <div class="li"><b style="background:var(--slate)"></b>Unidentified</div>
+      <div class="li"><b style="background:var(--teal)"></b>Site</div>
+      <div class="li thread"><b></b>Auto thread</div>
+      <div class="li thread manual"><b></b>Asserted link</div>
+    </div>
+
+    <!-- DETAIL PANEL -->
+    <section class="panel" id="panel">
+      <div class="ph">
+        <div>
+          <span class="tag" id="pTag">CASE</span>
+          <h2 id="pName">—</h2>
+        </div>
+        <span class="x" id="pClose">✕</span>
+      </div>
+      <div class="pb">
+        <div class="kv" id="pKV"></div>
+        <div class="chips" id="pChips"></div>
+        <div id="pNotesWrap" style="display:none">
+          <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--bone-faint);margin-bottom:5px">Notes</div>
+          <div class="notes" id="pNotes"></div>
+        </div>
+        <div id="pLinks" style="margin-top:16px"></div>
+      </div>
+      <div class="pf">
+        <button class="btn ghost" id="pCenter">Center</button>
+        <button class="btn ghost" id="pEdit">Edit</button>
+        <button class="btn danger" id="pDelete">Delete</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================
+   The Missing Map — local, self-contained.
+   Data model (case):
+   { id, name, type:'missing'|'homicide'|'unidentified'|'site',
+     date:string, year:number|null, lat, lng, approx:bool,
+     age, sex, agency, url, tags:[], notes, source }
+   Manual links: array of [idA, idB]
+   ============================================================ */
+
+const STORE_KEY = "coldcase_network_v1";
+const TYPE_COLOR = { missing:"#c9a14a", homicide:"#d05a52", unidentified:"#6f8aa3", site:"#74a8a0" };
+const TYPE_LABEL = { missing:"Missing · No recovery", homicide:"Homicide · No body", unidentified:"Unidentified remains", site:"Site of interest" };
+
+let state = { cases:[], links:[] };       // links = array of [idA,idB]
+let markers = new Map();                  // id -> L.marker
+let selectedId = null;
+let dropMode = false, linkMode = false, radiusMode = false, showThreads = true;
+let linkPick = null;                      // first id in link-mode pick
+let radius = null;                        // {center:[lat,lng], miles}
+let editingId = null;
+
+/* ---------- map ---------- */
+const map = L.map("map", { zoomControl:true, attributionControl:true, worldCopyJump:true })
+  .setView([39.5, -98.35], 4); // neutral US-wide default
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+  attribution:'&copy; OpenStreetMap &copy; CARTO', subdomains:"abcd", maxZoom:19
+}).addTo(map);
+
+map.createPane("threads"); map.getPane("threads").style.zIndex = 350;
+const threadLayer = L.layerGroup().addTo(map);
+let radiusLayer = null;
+
+/* ============================================================
+   PERSISTENCE
+   ============================================================ */
+function save(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){ toast("Save failed: "+e.message); } }
+function load(){
+  try{
+    const raw = localStorage.getItem(STORE_KEY);
+    if(raw){ state = JSON.parse(raw); state.cases ||= []; state.links ||= []; return true; }
+  }catch(e){}
+  return false;
+}
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+let _idc = Date.now();
+const uid = () => "c"+(_idc++).toString(36);
+const toast = (() => {
+  const el = document.getElementById("toast"); let t;
+  return (msg, ms=2600) => { el.textContent = msg; el.classList.add("show"); clearTimeout(t); t=setTimeout(()=>el.classList.remove("show"), ms); };
+})();
+function yearOf(d){ if(!d) return null; const m = String(d).match(/\b(1[89]\d\d|20\d\d)\b/); return m?parseInt(m[1]):null; }
+function haversine(a,b){ // miles
+  const R=3958.8, t=Math.PI/180;
+  const dLat=(b[0]-a[0])*t, dLng=(b[1]-a[1])*t;
+  const x=Math.sin(dLat/2)**2 + Math.cos(a[0]*t)*Math.cos(b[0]*t)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));
+}
+const esc = s => String(s??"").replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* ============================================================
+   FILTER LOGIC
+   ============================================================ */
+function activeTypes(){
+  const set = new Set();
+  document.querySelectorAll('.chk input[data-type]').forEach(c=>{ if(c.checked) set.add(c.dataset.type); });
+  return set;
+}
+function passesFilter(c){
+  const types = activeTypes();
+  if(!types.has(c.type)) return false;
+  const yMin = parseInt(document.getElementById("yrMin").value);
+  const yMax = parseInt(document.getElementById("yrMax").value);
+  if(!isNaN(yMin) && (c.year==null || c.year<yMin)) return false;
+  if(!isNaN(yMax) && (c.year==null || c.year>yMax)) return false;
+  const tagF = document.getElementById("tagFilter").value.trim().toLowerCase();
+  if(tagF && !(c.tags||[]).some(t=>t.toLowerCase().includes(tagF))) return false;
+  const q = document.getElementById("search").value.trim().toLowerCase();
+  if(q){
+    const hay = [c.name,c.agency,c.notes,(c.tags||[]).join(" "),c.url].join(" ").toLowerCase();
+    if(!hay.includes(q)) return false;
+  }
+  if(radius){
+    if(haversine(radius.center,[c.lat,c.lng]) > radius.miles) return false;
+  }
+  return true;
+}
+function visibleCases(){ return state.cases.filter(passesFilter); }
+
+/* ============================================================
+   THREAD (network) COMPUTATION
+   ============================================================ */
+function autoLinkParams(){
+  return {
+    useDist: document.getElementById("lnkDist").checked,
+    miles: (()=>{ let v=parseFloat(document.getElementById("lnkMiles").value)||0;
+                  return document.getElementById("lnkUnit").value==="km" ? v*0.621371 : v; })(),
+    useTime: document.getElementById("lnkTime").checked,
+    years: parseFloat(document.getElementById("lnkYears").value)||0,
+    useType: document.getElementById("lnkType").checked,
+    useTag: document.getElementById("lnkTag").checked,
+  };
+}
+function computeThreads(vis){
+  const p = autoLinkParams();
+  const edges = []; // {a,b,manual}
+  const seen = new Set();
+  const visIds = new Set(vis.map(c=>c.id));
+
+  // manual links first (always shown if both endpoints visible)
+  for(const [a,b] of state.links){
+    if(visIds.has(a) && visIds.has(b)){
+      const key=[a,b].sort().join("|");
+      if(!seen.has(key)){ seen.add(key); edges.push({a,b,manual:true}); }
+    }
+  }
+  // auto links
+  if(showThreads){
+    for(let i=0;i<vis.length;i++){
+      for(let j=i+1;j<vis.length;j++){
+        const A=vis[i], B=vis[j];
+        const key=[A.id,B.id].sort().join("|");
+        if(seen.has(key)) continue;
+        if(!p.useDist) continue; // distance is the spatial backbone
+        const d = haversine([A.lat,A.lng],[B.lat,B.lng]);
+        if(d > p.miles) continue;
+        if(p.useTime){
+          if(A.year==null||B.year==null) continue;
+          if(Math.abs(A.year-B.year) > p.years) continue;
+        }
+        if(p.useType && A.type!==B.type) continue;
+        if(p.useTag){
+          const ta=new Set((A.tags||[]).map(t=>t.toLowerCase()));
+          if(!(B.tags||[]).some(t=>ta.has(t.toLowerCase()))) continue;
+        }
+        edges.push({a:A.id,b:B.id,manual:false}); seen.add(key);
+      }
+    }
+  }
+  return edges;
+}
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function pinIcon(c, degree, sel){
+  const col = TYPE_COLOR[c.type] || "#bbb";
+  const degHtml = degree>0 ? `<span class="deg">${degree}</span>` : "";
+  return L.divIcon({
+    className:"", iconSize:[0,0],
+    html:`<div class="pin ${sel?'sel':''} ${degree>0?'has-deg':''}" style="color:${col}">
+            <div class="head" style="background:${col}"></div>${degHtml}
+          </div>`
+  });
+}
+function render(){
+  const vis = visibleCases();
+  const visIds = new Set(vis.map(c=>c.id));
+
+  // threads
+  const edges = computeThreads(vis);
+  const degree = {};
+  edges.forEach(e=>{ degree[e.a]=(degree[e.a]||0)+1; degree[e.b]=(degree[e.b]||0)+1; });
+  threadLayer.clearLayers();
+  const byId = Object.fromEntries(state.cases.map(c=>[c.id,c]));
+  edges.forEach(e=>{
+    const A=byId[e.a], B=byId[e.b];
+    L.polyline([[A.lat,A.lng],[B.lat,B.lng]], {
+      pane:"threads", className: e.manual?"thread-path manual":"thread-path", interactive:false
+    }).addTo(threadLayer);
+  });
+
+  // markers — remove stale
+  for(const [id,m] of markers){ if(!visIds.has(id)){ map.removeLayer(m); markers.delete(id); } }
+  // add / update
+  vis.forEach(c=>{
+    const deg = degree[c.id]||0;
+    const sel = c.id===selectedId;
+    let m = markers.get(c.id);
+    if(!m){
+      m = L.marker([c.lat,c.lng], {icon:pinIcon(c,deg,sel)}).addTo(map);
+      m.on("click", ()=>onMarkerClick(c.id));
+      markers.set(c.id,m);
+    } else {
+      m.setLatLng([c.lat,c.lng]);
+      m.setIcon(pinIcon(c,deg,sel));
+    }
+  });
+
+  // stats + counts
+  document.getElementById("stTotal").textContent = state.cases.length;
+  document.getElementById("stShown").textContent = vis.length;
+  document.getElementById("stLinks").textContent = edges.length;
+  const counts = {missing:0,homicide:0,unidentified:0,site:0};
+  state.cases.forEach(c=>{ if(counts[c.type]!=null) counts[c.type]++; });
+  for(const k in counts){ const el=document.getElementById("c"+k[0].toUpperCase()+k.slice(1)); if(el) el.textContent=counts[k]; }
+}
+
+/* ============================================================
+   MARKER / LINK INTERACTION
+   ============================================================ */
+function onMarkerClick(id){
+  if(linkMode){
+    if(linkPick==null){ linkPick=id; toast("Pick a second case to thread to…"); markers.get(id) && pulse(id); }
+    else if(linkPick===id){ linkPick=null; toast("Link canceled."); }
+    else{
+      const key=[linkPick,id].sort();
+      const exists = state.links.some(l=>{ const s=[l[0],l[1]].sort(); return s[0]===key[0]&&s[1]===key[1]; });
+      if(exists){ toast("Those cases are already linked."); }
+      else{ state.links.push([linkPick,id]); save(); toast("Thread asserted."); }
+      linkPick=null; render(); openPanel(id);
+    }
+    return;
+  }
+  openPanel(id);
+}
+function pulse(id){ const m=markers.get(id); if(m){ const el=m.getElement(); if(el){ el.style.transition="transform .15s"; } } }
+
+/* ============================================================
+   DETAIL PANEL
+   ============================================================ */
+function openPanel(id){
+  const c = state.cases.find(x=>x.id===id); if(!c) return;
+  selectedId=id; render();
+  const col = TYPE_COLOR[c.type];
+  const tag = document.getElementById("pTag");
+  tag.textContent = (TYPE_LABEL[c.type]||c.type).toUpperCase(); tag.style.color=col;
+  document.getElementById("pName").textContent = c.name||"Unnamed case";
+
+  const rows=[];
+  if(c.date) rows.push(["Date", esc(c.date)]);
+  if(c.age) rows.push(["Age", esc(c.age)]);
+  if(c.sex) rows.push(["Sex", esc(c.sex)]);
+  if(c.agency) rows.push(["Agency", esc(c.agency)]);
+  rows.push(["Coords", `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)} ${c.approx?'<span class="approx">≈ approx</span>':''}`]);
+  if(c.source) rows.push(["Source", esc(c.source)]);
+  if(c.url) rows.push(["Link", `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.url.replace(/^https?:\/\//,'').slice(0,40))}…</a>`]);
+  document.getElementById("pKV").innerHTML = rows.map(r=>`<div class="k">${r[0]}</div><div class="v">${r[1]}</div>`).join("");
+
+  document.getElementById("pChips").innerHTML = (c.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join("");
+  const nw = document.getElementById("pNotesWrap");
+  if(c.notes){ nw.style.display="block"; document.getElementById("pNotes").textContent=c.notes; } else nw.style.display="none";
+
+  // linked cases
+  const linked = state.links.filter(l=>l.includes(id)).map(l=>l[0]===id?l[1]:l[0]);
+  const lw = document.getElementById("pLinks");
+  if(linked.length){
+    lw.innerHTML = `<div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--bone-faint);margin-bottom:6px">Asserted links</div>`+
+      linked.map(lid=>{ const lc=state.cases.find(x=>x.id===lid); if(!lc) return "";
+        return `<div class="chip" style="cursor:pointer;margin:0 4px 4px 0;display:inline-block" onclick="window.__goto('${lid}')">↳ ${esc(lc.name||lid)}</div>`;
+      }).join("");
+  } else lw.innerHTML="";
+
+  document.getElementById("panel").classList.add("open");
+}
+window.__goto = id => { openPanel(id); const c=state.cases.find(x=>x.id===id); if(c) map.panTo([c.lat,c.lng]); };
+function closePanel(){ document.getElementById("panel").classList.remove("open"); selectedId=null; render(); }
+
+/* ============================================================
+   ADD / EDIT / DELETE
+   ============================================================ */
+function readForm(){
+  const lat=parseFloat(document.getElementById("fLat").value);
+  const lng=parseFloat(document.getElementById("fLng").value);
+  const name=document.getElementById("fName").value.trim();
+  if(!name){ toast("Name is required."); return null; }
+  if(isNaN(lat)||isNaN(lng)){ toast("Set a location (drop on map or type lat/lng)."); return null; }
+  const date=document.getElementById("fDate").value.trim();
+  return {
+    id: editingId||uid(),
+    name, type:document.getElementById("fType").value,
+    date, year:yearOf(date),
+    lat, lng, approx:document.getElementById("fApprox").checked,
+    age:"", sex:"",
+    agency:document.getElementById("fAgency").value.trim(),
+    url:document.getElementById("fUrl").value.trim(),
+    tags:document.getElementById("fTags").value.split(",").map(t=>t.trim()).filter(Boolean),
+    notes:document.getElementById("fNotes").value.trim(),
+    source: editingId ? (state.cases.find(c=>c.id===editingId)?.source||"manual") : "manual"
+  };
+}
+function clearForm(){
+  ["fName","fDate","fLat","fLng","fAgency","fUrl","fTags","fNotes"].forEach(id=>document.getElementById(id).value="");
+  document.getElementById("fApprox").checked=false; document.getElementById("fType").value="missing";
+  editingId=null; document.getElementById("btnAdd").textContent="Add case";
+}
+document.getElementById("btnAdd").onclick = ()=>{
+  const c=readForm(); if(!c) return;
+  if(editingId){ const i=state.cases.findIndex(x=>x.id===editingId); state.cases[i]=c; toast("Case updated."); }
+  else{ state.cases.push(c); toast("Case added."); }
+  save(); clearForm(); render(); if(c) openPanel(c.id);
+};
+document.getElementById("pEdit").onclick = ()=>{
+  const c=state.cases.find(x=>x.id===selectedId); if(!c) return;
+  editingId=c.id;
+  document.getElementById("fName").value=c.name||""; document.getElementById("fType").value=c.type;
+  document.getElementById("fDate").value=c.date||""; document.getElementById("fLat").value=c.lat;
+  document.getElementById("fLng").value=c.lng; document.getElementById("fAgency").value=c.agency||"";
+  document.getElementById("fUrl").value=c.url||""; document.getElementById("fTags").value=(c.tags||[]).join(", ");
+  document.getElementById("fNotes").value=c.notes||""; document.getElementById("fApprox").checked=!!c.approx;
+  document.getElementById("btnAdd").textContent="Save edit";
+  document.querySelector(".rail-scroll").scrollTo({top:99999,behavior:"smooth"});
+  toast("Editing — change fields, then Save edit.");
+};
+document.getElementById("pDelete").onclick = ()=>{
+  const c=state.cases.find(x=>x.id===selectedId); if(!c) return;
+  if(!confirm(`Delete "${c.name}"? This removes it from the board.`)) return;
+  state.cases=state.cases.filter(x=>x.id!==selectedId);
+  state.links=state.links.filter(l=>!l.includes(selectedId));
+  const m=markers.get(selectedId); if(m){ map.removeLayer(m); markers.delete(selectedId); }
+  save(); closePanel(); toast("Case deleted.");
+};
+document.getElementById("pCenter").onclick=()=>{ const c=state.cases.find(x=>x.id===selectedId); if(c) map.setView([c.lat,c.lng], Math.max(map.getZoom(),14)); };
+document.getElementById("pClose").onclick=closePanel;
+
+/* ---------- drop on map ---------- */
+document.getElementById("btnDrop").onclick = ()=>{
+  dropMode=!dropMode; document.getElementById("btnDrop").classList.toggle("go",dropMode);
+  toast(dropMode?"Click the map to set the new case location.":"Drop canceled.");
+};
+map.on("click", e=>{
+  if(dropMode){
+    document.getElementById("fLat").value=e.latlng.lat.toFixed(5);
+    document.getElementById("fLng").value=e.latlng.lng.toFixed(5);
+    dropMode=false; document.getElementById("btnDrop").classList.remove("go");
+    toast("Location set. Fill the form and Add case."); return;
+  }
+  if(radiusMode){ setRadiusCenter(e.latlng); return; }
+});
+
+/* ============================================================
+   RADIUS TOOL
+   ============================================================ */
+function setRadiusCenter(latlng){
+  const mi = parseFloat(prompt("Radius filter — show only cases within how many miles?", radius?radius.miles:25));
+  if(isNaN(mi)||mi<=0){ radiusMode=false; document.getElementById("pillRadius").classList.remove("on"); return; }
+  radius={ center:[latlng.lat,latlng.lng], miles:mi };
+  if(radiusLayer) map.removeLayer(radiusLayer);
+  radiusLayer = L.circle(radius.center, { radius:mi*1609.34, className:"radius-ring", interactive:false }).addTo(map);
+  radiusMode=false;
+  document.getElementById("pillRadius").classList.add("on"); // stays lit while radius filter is active
+  render(); toast(`Filtering to ${mi} mi radius. Click Radius again to clear.`);
+}
+document.getElementById("pillRadius").onclick = ()=>{
+  if(radius){ radius=null; if(radiusLayer){map.removeLayer(radiusLayer); radiusLayer=null;} document.getElementById("pillRadius").classList.remove("on"); render(); toast("Radius filter cleared."); return; }
+  radiusMode=!radiusMode; document.getElementById("pillRadius").classList.toggle("on",radiusMode);
+  toast(radiusMode?"Click the map to set the radius center.":"");
+};
+
+/* ============================================================
+   TOP PILLS
+   ============================================================ */
+document.getElementById("pillNet").classList.toggle("on", showThreads);
+document.getElementById("pillNet").onclick = ()=>{ showThreads=!showThreads; document.getElementById("pillNet").classList.toggle("on",showThreads); render(); };
+document.getElementById("pillLink").onclick = ()=>{
+  linkMode=!linkMode; linkPick=null; document.getElementById("pillLink").classList.toggle("on",linkMode);
+  toast(linkMode?"Link mode: click two cases to assert a thread between them.":"Link mode off.");
+};
+document.getElementById("pillFit").onclick = ()=>{
+  const vis=visibleCases(); if(!vis.length){ toast("Nothing on the board to fit."); return; }
+  map.fitBounds(L.latLngBounds(vis.map(c=>[c.lat,c.lng])).pad(0.2));
+};
+
+/* ============================================================
+   FILTER EVENTS
+   ============================================================ */
+["yrMin","yrMax","tagFilter","search","lnkDist","lnkMiles","lnkUnit","lnkTime","lnkYears","lnkType","lnkTag"]
+  .forEach(id=>{ const el=document.getElementById(id); el.addEventListener("input",render); el.addEventListener("change",render); });
+document.querySelectorAll('.chk input[data-type]').forEach(c=>c.addEventListener("change",render));
+
+/* ============================================================
+   IMPORT / EXPORT
+   ============================================================ */
+document.getElementById("btnImport").onclick=()=>document.getElementById("fileImport").click();
+document.getElementById("fileImport").onchange=function(){
+  const f=this.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{ try{
+      if(f.name.toLowerCase().endsWith(".json")) importJSON(r.result);
+      else importCSV(r.result);
+    }catch(e){ toast("Import failed: "+e.message); }
+    this.value=""; };
+  r.readAsText(f);
+};
+function normalizeCase(o){
+  const lat=parseFloat(o.lat), lng=parseFloat(o.lng ?? o.lon ?? o.long);
+  if(isNaN(lat)||isNaN(lng)) return null;
+  let type=(o.type||"missing").toLowerCase();
+  if(!TYPE_COLOR[type]) type = /homic|murder/.test(type)?"homicide": /unident|doe|remain/.test(type)?"unidentified": /site/.test(type)?"site":"missing";
+  const date=o.date||o.year||"";
+  return {
+    id:o.id||uid(), name:(o.name||o.title||"Unnamed").toString().trim(), type,
+    date:String(date), year:yearOf(date)||(parseInt(o.year)||null),
+    lat, lng, approx: o.approx===true||/^(1|true|y|yes)$/i.test(String(o.approx||"")),
+    age:o.age||"", sex:o.sex||"",
+    agency:o.agency||"", url:o.url||"", source:o.source||"import",
+    tags: Array.isArray(o.tags)?o.tags:(o.tags?String(o.tags).split(/[;|]/).map(t=>t.trim()).filter(Boolean):[]),
+    notes:o.notes||""
+  };
+}
+function importJSON(txt){
+  const data=JSON.parse(txt);
+  const arr = Array.isArray(data)?data:(data.cases||[]);
+  let n=0; arr.forEach(o=>{ const c=normalizeCase(o); if(c){ state.cases.push(c); n++; } });
+  if(data.links && Array.isArray(data.links)) state.links.push(...data.links);
+  save(); render(); fitAll(); toast(`Imported ${n} cases.`);
+}
+function parseCSV(text){
+  const rows=[]; let i=0, field="", row=[], q=false;
+  while(i<text.length){
+    const ch=text[i];
+    if(q){ if(ch==='"'){ if(text[i+1]==='"'){field+='"';i++;} else q=false; } else field+=ch; }
+    else{ if(ch==='"') q=true; else if(ch===","){ row.push(field); field=""; }
+          else if(ch==="\n"||ch==="\r"){ if(field!==""||row.length){ row.push(field); rows.push(row); row=[]; field=""; } if(ch==="\r"&&text[i+1]==="\n") i++; }
+          else field+=ch; }
+    i++;
+  }
+  if(field!==""||row.length){ row.push(field); rows.push(row); }
+  return rows.filter(r=>r.length>1 || (r.length===1 && r[0].trim()!==""));
+}
+function importCSV(text){
+  const rows=parseCSV(text); if(rows.length<2){ toast("CSV looks empty."); return; }
+  const head=rows[0].map(h=>h.trim().toLowerCase());
+  let n=0;
+  for(let r=1;r<rows.length;r++){
+    const o={}; head.forEach((h,k)=>o[h]=rows[r][k]);
+    const c=normalizeCase(o); if(c){ state.cases.push(c); n++; }
+  }
+  save(); render(); fitAll(); toast(`Imported ${n} cases from CSV.`);
+}
+document.getElementById("btnTemplate").onclick=()=>{
+  const csv=`name,type,date,lat,lng,age,sex,agency,url,tags,notes,approx
+Example Name,missing,2017-06-04,40.7589,-73.9851,27,F,Local PD,https://example.org/case,"downtown;last seen","brief circumstances here",1
+Example Name 2,homicide,2011,34.0522,-118.2437,,M,State Police,,"highway;vehicle","no body recovered",0`;
+  downloadFile("missingmap_template.csv", csv, "text/csv");
+  toast("Template downloaded — fill it and re-import.");
+};
+document.getElementById("btnExport").onclick=()=>{
+  const stamp=new Date().toISOString().replace(/[:.]/g,"-").slice(0,19);
+  downloadFile(`missingmap_export_${stamp}.json`, JSON.stringify(state,null,2), "application/json");
+  // also CSV
+  const cols=["id","name","type","date","year","lat","lng","approx","age","sex","agency","url","source","tags","notes"];
+  const csv=[cols.join(",")].concat(state.cases.map(c=>cols.map(k=>{
+    let v=k==="tags"?(c.tags||[]).join(";"):c[k]; v=v==null?"":String(v);
+    return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;
+  }).join(","))).join("\n");
+  downloadFile(`missingmap_export_${stamp}.csv`, csv, "text/csv");
+  toast("Exported JSON + CSV (chain-of-custody copies).");
+};
+function downloadFile(name, content, mime){
+  const blob=new Blob([content],{type:mime});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1500);
+}
+document.getElementById("btnClear").onclick=()=>{
+  if(!confirm("Clear the entire board? Export first if you want to keep it.")) return;
+  state={cases:[],links:[]}; markers.forEach(m=>map.removeLayer(m)); markers.clear();
+  save(); closePanel(); render(); toast("Board cleared.");
+};
+
+/* ============================================================
+   FBI LIVE PULL  (api.fbi.gov — no key)
+   Pulls missing + ViCAP + murder classifications, geocodes via
+   Nominatim where a place can be parsed. Unplaced go to a tray
+   you can position by clicking the map.
+   ============================================================ */
+let geoQueue=[], geoBusy=false;
+async function geocode(q){
+  const url="https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q);
+  const res=await fetch(url,{headers:{"Accept":"application/json"}});
+  if(!res.ok) throw new Error("geocode "+res.status);
+  const j=await res.json();
+  if(j[0]) return [parseFloat(j[0].lat), parseFloat(j[0].lon)];
+  return null;
+}
+async function runGeoQueue(){
+  if(geoBusy) return; geoBusy=true;
+  while(geoQueue.length){
+    const job=geoQueue.shift();
+    try{ const ll=await geocode(job.place);
+         if(ll){ job.case.lat=ll[0]; job.case.lng=ll[1]; job.case.approx=true; state.cases.push(job.case); save(); render(); }
+    }catch(e){ /* skip */ }
+    document.getElementById("dataHint").textContent=`Geocoding FBI cases… ${geoQueue.length} left`;
+    await new Promise(r=>setTimeout(r,1100)); // Nominatim: 1 req/sec
+  }
+  geoBusy=false; document.getElementById("dataHint").textContent="Everything stays in this browser (localStorage). Nothing is uploaded.";
+  fitAll(); toast("FBI pull complete.");
+}
+async function pullFBI(){
+  toast("Contacting FBI Wanted API…");
+  const classes=[
+    {poster_classification:"missing", tag:"fbi:missing", type:"missing"},
+    {poster_classification:"victim", tag:"fbi:victim", type:"homicide"},
+  ];
+  let added=0, unplaced=0;
+  try{
+    for(const cl of classes){
+      for(let page=1; page<=2; page++){ // 2 pages * 50 = up to 100 each
+        const url=`https://api.fbi.gov/wanted/v1/list?pageSize=50&page=${page}&poster_classification=${cl.poster_classification}`;
+        const res=await fetch(url,{headers:{"Accept":"application/json"}});
+        if(!res.ok) throw new Error("HTTP "+res.status);
+        const data=await res.json();
+        const items=data.items||[];
+        if(!items.length) break;
+        items.forEach(it=>{
+          const place = (it.field_offices&&it.field_offices[0]) || parsePlace(it.title) || "";
+          const c = {
+            id:"fbi-"+(it.uid||uid()), name:it.title||"FBI case",
+            type: /murder|homic/i.test((it.subjects||[]).join(" "))?"homicide":cl.type,
+            date: it.publication||"", year:yearOf(it.publication||""),
+            lat:null, lng:null, approx:true, age:it.age_range||"", sex:it.sex||"",
+            agency:"FBI", url:it.url||"", source:"FBI Wanted API",
+            tags:[cl.tag].concat(it.subjects||[]).slice(0,6),
+            notes:(it.details||it.caution||it.description||"").replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,1200)
+          };
+          if(place){ geoQueue.push({case:c, place:place+", USA"}); unplaced++; }
+        });
+      }
+    }
+    added = unplaced;
+    if(unplaced){ toast(`Queued ${unplaced} FBI cases for geocoding…`); runGeoQueue(); }
+    else toast("No FBI cases returned.");
+  }catch(err){
+    toast("FBI pull blocked (likely CORS on local file). See note in console.");
+    console.warn("[FBI] "+err.message+
+      "\nThe FBI Wanted API often blocks browser requests via CORS. This works best when the page is served over https (e.g. GitHub Pages) rather than opened as a local file. CSV import always works regardless.");
+    document.getElementById("dataHint").innerHTML=
+      'FBI pull was blocked (CORS). It works more reliably when hosted over https (GitHub Pages). CSV import always works.';
+  }
+}
+function parsePlace(title){
+  if(!title) return "";
+  const m=title.match(/-\s*([A-Z][A-Za-z .']+,\s*[A-Z]{2})\b/); // "NAME - CITY, ST"
+  return m?m[1]:"";
+}
+document.getElementById("btnFbi").onclick=pullFBI;
+
+/* ============================================================
+   DEMO NODES  (clearly fake — for testing the thread board)
+   ============================================================ */
+document.getElementById("btnDemo").onclick=()=>{
+  const ctr=map.getCenter(); const base=[ctr.lat, ctr.lng];
+  const span = Math.max(0.12, 9/Math.pow(2, map.getZoom()-6)); // scale spread to zoom
+  const types=["missing","homicide","unidentified"];
+  const tagsets=[["downtown"],["highway","vehicle"],["downtown","park"],["highway"],["river"],["trail"],["industrial"],["river","park"]];
+  for(let i=0;i<8;i++){
+    const lat=base[0]+(Math.random()-0.5)*span, lng=base[1]+(Math.random()-0.5)*span*1.3;
+    state.cases.push({ id:uid(), name:`SAMPLE Node ${i+1}`, type:types[i%3],
+      date:String(2008+Math.floor(Math.random()*16)), year:2008+Math.floor(Math.random()*16),
+      lat, lng, approx:true, age:"", sex:"", agency:"DEMO", url:"", source:"demo",
+      tags:["SAMPLE"].concat(tagsets[i]), notes:"Synthetic placeholder for testing the thread network. Not a real case." });
+  }
+  save(); render(); fitAll(); toast("Added 8 SAMPLE nodes (tagged SAMPLE). Clear them anytime.");
+};
+
+/* ============================================================
+   FIRST RUN — start empty. Load data via Import, Pull FBI,
+   Demo nodes, or Add a case. Your data lives only in this
+   browser (localStorage) unless you Export it.
+   ============================================================ */
+function fitAll(){ const v=visibleCases(); if(v.length) map.fitBounds(L.latLngBounds(v.map(c=>[c.lat,c.lng])).pad(0.25)); }
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+if(!load()){ state={cases:[],links:[]}; save(); }
+render();
+if(state.cases.length) fitAll();
+window.addEventListener("keydown",e=>{ if(e.key==="Escape"){ closePanel(); if(dropMode){dropMode=false;document.getElementById("btnDrop").classList.remove("go");} if(linkMode){linkMode=false;linkPick=null;document.getElementById("pillLink").classList.remove("on");} } });
+</script>
+</body>
+</html>
