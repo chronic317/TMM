@@ -1,0 +1,5 @@
+name,type,date,lat,lng,age,sex,agency,url,tags,notes,approx
+Example Name,missing,2017-06-04,40.7589,-73.9851,27,F,Local PD,https://example.org/case,downtown;last seen,brief circumstances here,1
+Example Name 2,homicide,2011,34.0522,-118.2437,,M,State Police,,highway;vehicle,no body recovered,0
+Example Name 3,unidentified,2003,41.8781,-87.6298,,,County ME,,waterway,remains found; unidentified,1
+Example Site,site,1962,29.7604,-95.3698,,,,,industrial,location of interest,1
