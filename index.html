@@ -512,7 +512,10 @@ function computeThreads(vis){
     }
   }
   // auto links
-  if(showThreads){
+  // PERF: O(n^2) edge generation can produce tens of thousands of lines.
+  // Only auto-thread when the visible set is small enough to stay responsive.
+  const AUTO_THREAD_MAX = 75;
+  if(showThreads && vis.length <= AUTO_THREAD_MAX){
     for(let i=0;i<vis.length;i++){
       for(let j=i+1;j<vis.length;j++){
         const A=vis[i], B=vis[j];
@@ -768,9 +771,11 @@ document.getElementById("pillFit").onclick = ()=>{
 /* ============================================================
    FILTER EVENTS
    ============================================================ */
+let _renderT=null;
+function renderDebounced(){ clearTimeout(_renderT); _renderT=setTimeout(render, 180); }
 ["yrMin","yrMax","tagFilter","search","lnkDist","lnkMiles","lnkUnit","lnkTime","lnkYears","lnkType","lnkTag"]
-  .forEach(id=>{ const el=document.getElementById(id); el.addEventListener("input",render); el.addEventListener("change",render); });
-document.querySelectorAll('.chk input[data-type]').forEach(c=>c.addEventListener("change",render));
+  .forEach(id=>{ const el=document.getElementById(id); el.addEventListener("input",renderDebounced); el.addEventListener("change",renderDebounced); });
+document.querySelectorAll('.chk input[data-type]').forEach(c=>c.addEventListener("change",renderDebounced));
 
 /* ============================================================
    IMPORT / EXPORT
