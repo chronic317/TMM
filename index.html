@@ -656,12 +656,19 @@ function closePanel(){ document.getElementById("panel").classList.remove("open")
 /* ============================================================
    ADD / EDIT / DELETE
    ============================================================ */
+function flagField(id){
+  const el=document.getElementById(id); if(!el) return;
+  el.style.borderColor="var(--oxblood-bright)";
+  el.focus();
+  const clear=()=>{ el.style.borderColor=""; el.removeEventListener("input",clear); };
+  el.addEventListener("input",clear);
+}
 function readForm(){
   const lat=parseFloat(document.getElementById("fLat").value);
   const lng=parseFloat(document.getElementById("fLng").value);
   const name=document.getElementById("fName").value.trim();
-  if(!name){ toast("Name is required."); return null; }
-  if(isNaN(lat)||isNaN(lng)){ toast("Set a location (drop on map or type lat/lng)."); return null; }
+  if(!name){ toast("Name is required."); flagField("fName"); return null; }
+  if(isNaN(lat)||isNaN(lng)){ toast("Set a location (drop on map or type lat/lng)."); if(isNaN(lat)) flagField("fLat"); if(isNaN(lng)) flagField("fLng"); return null; }
   const date=document.getElementById("fDate").value.trim();
   return {
     id: editingId||uid(),
@@ -957,10 +964,22 @@ document.getElementById("btnDemo").onclick=()=>{
    ============================================================ */
 function fitAll(){ const v=visibleCases(); if(v.length) map.fitBounds(L.latLngBounds(v.map(c=>[c.lat,c.lng])).pad(0.25)); }
 
+const SEED_CASES = [
+  { name:"Example Name",   type:"missing",      date:"2017-06-04", lat:40.7589,  lng:-73.9851, age:"27", sex:"F", agency:"Local PD",     url:"https://example.org/case", tags:["downtown","last seen"], notes:"brief circumstances here", approx:true,  source:"seed" },
+  { name:"Example Name 2", type:"homicide",     date:"2011",       lat:34.0522,  lng:-118.2437, age:"",  sex:"M", agency:"State Police", url:"",                         tags:["highway","vehicle"],    notes:"no body recovered",      approx:false, source:"seed" },
+  { name:"Example Name 3", type:"unidentified", date:"2003",       lat:41.8781,  lng:-87.6298, age:"",  sex:"",  agency:"County ME",    url:"",                         tags:["waterway"],             notes:"remains found; unidentified", approx:true, source:"seed" },
+  { name:"Example Site",   type:"site",         date:"1962",       lat:29.7604,  lng:-95.3698, age:"",  sex:"",  agency:"",             url:"",                         tags:["industrial"],           notes:"location of interest",   approx:true,  source:"seed" }
+];
+function loadSeed(){
+  SEED_CASES.forEach(o=>{ const c=normalizeCase(o); if(c) state.cases.push(c); });
+  save();
+}
+
+
 /* ============================================================
    BOOT
    ============================================================ */
-if(!load()){ state={cases:[],links:[]}; save(); }
+if(!load()){ state={cases:[],links:[]}; loadSeed(); }
 render();
 if(state.cases.length) fitAll();
 window.addEventListener("keydown",e=>{ if(e.key==="Escape"){ closePanel(); if(dropMode){dropMode=false;document.getElementById("btnDrop").classList.remove("go");} if(linkMode){linkMode=false;linkPick=null;document.getElementById("pillLink").classList.remove("on");} } });
