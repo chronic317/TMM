@@ -972,23 +972,28 @@ function fitAll(){ const v=visibleCases(); if(v.length) map.fitBounds(L.latLngBo
    always-fresh); they re-fetch every time the page opens.
    ============================================================ */
 const LIVE_SOURCE = {
-  label: "Chicago Open Data",
-  url: "https://data.cityofchicago.org/resource/ijzp-q8t2.json?$limit=200&$order=date%20DESC&$where=latitude%20IS%20NOT%20NULL&primary_type=HOMICIDE"
+  label: "Indianapolis IMPD (UCR 2021)",
+  // Official IndyGIS open-data layer. ArcGIS query API, CORS-enabled.
+  // UCR 110 = Criminal Homicide. Each row carries real LATITUDE/LONGITUDE.
+  url: "https://gis.indy.gov/server/rest/services/OpenData/OpenData_NonSpatial/MapServer/27/query?where=UCR%3D110&outFields=CRIME,DATE_,TIME,CASE_,ADDRESS,LATITUDE,LONGITUDE&resultRecordCount=500&f=json"
 };
 function mapLiveRow(o){
-  const lat = parseFloat(o.latitude), lng = parseFloat(o.longitude);
+  const lat = parseFloat(o.LATITUDE), lng = parseFloat(o.LONGITUDE);
   if(isNaN(lat) || isNaN(lng)) return null;
-  const block = (o.block||"").trim();
+  const addr = (o.ADDRESS||"").trim();
+  // DATE_ is epoch milliseconds; render as YYYY-MM-DD
+  let dateStr = "";
+  if(o.DATE_ != null && !isNaN(parseInt(o.DATE_))){ dateStr = new Date(parseInt(o.DATE_)).toISOString().slice(0,10); }
   return {
-    id: "live-" + (o.case_number || o.id || uid()),
-    name: o.case_number ? (o.case_number + (block?" \u00b7 "+block:"")) : "Case",
+    id: "live-" + (o.CASE_ || o.OBJECTID || uid()),
+    name: o.CASE_ ? (o.CASE_ + (addr?" \u00b7 "+addr:"")) : (addr || "Case"),
     type: "homicide",
-    date: String(o.date||"").slice(0,10),
-    year: yearOf(o.date||""),
+    date: dateStr,
+    year: yearOf(dateStr),
     lat, lng, approx:false, age:"", sex:"",
-    agency:"Chicago PD", url:"", source: LIVE_SOURCE.label,
-    tags: [ (o.primary_type||"").toLowerCase(), (o.location_description||"").toLowerCase() ].filter(Boolean).slice(0,4),
-    notes: [o.description, block].filter(Boolean).join(" \u2014 "),
+    agency:"IMPD", url:"", source: LIVE_SOURCE.label,
+    tags: [ "homicide", (o.CRIME||"").toLowerCase() ].filter(Boolean).slice(0,4),
+    notes: [o.CRIME, addr, (o.TIME?("Time: "+o.TIME):"")].filter(Boolean).join(" \u2014 "),
     _live: true
   };
 }
@@ -997,7 +1002,9 @@ async function pullLive(){
   try{
     const res = await fetch(LIVE_SOURCE.url, {headers:{"Accept":"application/json"}});
     if(!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || "API error");
+    const data = (json.features || []).map(f => f.attributes || f);
     state.cases = state.cases.filter(c => !c._live);
     const seen = new Set(state.cases.map(c=>c.id));
     let n = 0;
