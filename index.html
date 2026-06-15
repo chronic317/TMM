@@ -428,7 +428,7 @@ let radiusLayer = null;
 /* ============================================================
    PERSISTENCE
    ============================================================ */
-function save(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){ toast("Save failed: "+e.message); } }
+function save(){ try{ const persist = { cases: state.cases.filter(c=>!c._live), links: state.links }; localStorage.setItem(STORE_KEY, JSON.stringify(persist)); }catch(e){ toast("Save failed: "+e.message); } }
 function load(){
   try{
     const raw = localStorage.getItem(STORE_KEY);
@@ -964,6 +964,58 @@ document.getElementById("btnDemo").onclick=()=>{
    ============================================================ */
 function fitAll(){ const v=visibleCases(); if(v.length) map.fitBounds(L.latLngBounds(v.map(c=>[c.lat,c.lng])).pad(0.25)); }
 
+/* ============================================================
+   LIVE PULL — fetches fresh public records each load.
+   Source: Chicago Open Data (Socrata, CORS-enabled). Records
+   carry real per-incident lat/lng, so pins place accurately.
+   Live cases are NOT written to localStorage (privacy +
+   always-fresh); they re-fetch every time the page opens.
+   ============================================================ */
+const LIVE_SOURCE = {
+  label: "Chicago Open Data",
+  url: "https://data.cityofchicago.org/resource/ijzp-q8t2.json?$limit=200&$order=date%20DESC&$where=latitude%20IS%20NOT%20NULL&primary_type=HOMICIDE"
+};
+function mapLiveRow(o){
+  const lat = parseFloat(o.latitude), lng = parseFloat(o.longitude);
+  if(isNaN(lat) || isNaN(lng)) return null;
+  const block = (o.block||"").trim();
+  return {
+    id: "live-" + (o.case_number || o.id || uid()),
+    name: o.case_number ? (o.case_number + (block?" \u00b7 "+block:"")) : "Case",
+    type: "homicide",
+    date: String(o.date||"").slice(0,10),
+    year: yearOf(o.date||""),
+    lat, lng, approx:false, age:"", sex:"",
+    agency:"Chicago PD", url:"", source: LIVE_SOURCE.label,
+    tags: [ (o.primary_type||"").toLowerCase(), (o.location_description||"").toLowerCase() ].filter(Boolean).slice(0,4),
+    notes: [o.description, block].filter(Boolean).join(" \u2014 "),
+    _live: true
+  };
+}
+async function pullLive(){
+  toast("Loading live records from " + LIVE_SOURCE.label + "\u2026");
+  try{
+    const res = await fetch(LIVE_SOURCE.url, {headers:{"Accept":"application/json"}});
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    state.cases = state.cases.filter(c => !c._live);
+    const seen = new Set(state.cases.map(c=>c.id));
+    let n = 0;
+    data.forEach(o => { const c = mapLiveRow(o); if(c && !seen.has(c.id)){ seen.add(c.id); state.cases.push(c); n++; } });
+    render();
+    if(n) fitAll();
+    toast("Loaded " + n + " live records from " + LIVE_SOURCE.label + ".");
+    document.getElementById("dataHint").textContent = "Live data from " + LIVE_SOURCE.label + " \u2014 refreshed each load, not stored.";
+  }catch(err){
+    toast("Live pull failed: " + err.message);
+    document.getElementById("dataHint").textContent = "Live pull failed (" + err.message + "). You can still Import a CSV/JSON or Add cases.";
+    console.warn("[LIVE] " + err.message);
+  }
+}
+document.getElementById("btnFbi").textContent = "Pull live cases";
+document.getElementById("btnFbi").onclick = pullLive;
+
+
 const SEED_CASES = [
   { name:"Example Name",   type:"missing",      date:"2017-06-04", lat:40.7589,  lng:-73.9851, age:"27", sex:"F", agency:"Local PD",     url:"https://example.org/case", tags:["downtown","last seen"], notes:"brief circumstances here", approx:true,  source:"seed" },
   { name:"Example Name 2", type:"homicide",     date:"2011",       lat:34.0522,  lng:-118.2437, age:"",  sex:"M", agency:"State Police", url:"",                         tags:["highway","vehicle"],    notes:"no body recovered",      approx:false, source:"seed" },
@@ -979,9 +1031,12 @@ function loadSeed(){
 /* ============================================================
    BOOT
    ============================================================ */
-if(!load()){ state={cases:[],links:[]}; loadSeed(); }
+if(!load()){ state={cases:[],links:[]}; }
+// strip any stale live rows from a previous session before refetching
+state.cases = (state.cases||[]).filter(c => !c._live);
 render();
 if(state.cases.length) fitAll();
+pullLive(); // fetch fresh public records on every load
 window.addEventListener("keydown",e=>{ if(e.key==="Escape"){ closePanel(); if(dropMode){dropMode=false;document.getElementById("btnDrop").classList.remove("go");} if(linkMode){linkMode=false;linkPick=null;document.getElementById("pillLink").classList.remove("on");} } });
 </script>
 </body>
